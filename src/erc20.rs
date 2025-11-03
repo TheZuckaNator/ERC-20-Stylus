@@ -1,4 +1,3 @@
-//! ERC-20 example (unaudited)
 
 use alloc::string::String;
 use core::marker::PhantomData;

@@ -3,13 +3,15 @@
 extern crate alloc;
 
 mod erc20;
+mod ownable2step;
 
-// Alias the SDK’s re-exports under the crate names expected by the macros.
+// Alias the SDK's re-exports under the crate names expected by the macros.
 use stylus_sdk::alloy_primitives as alloy_primitives;
 
 use stylus_sdk::alloy_primitives::{Address, U256};
 use stylus_sdk::prelude::*;
 use crate::erc20::{Erc20, Erc20Params, Erc20Error};
+use crate::ownable2step::{Ownable2Step, Ownable2StepError};
 
 /// Immutable definitions
 struct StylusTokenParams;
@@ -26,22 +28,47 @@ sol_storage! {
         /// Allows erc20 to access StylusToken's storage and make calls
         #[borrow]
         Erc20<StylusTokenParams> erc20;
+        /// Ownable2Step for access control
+        #[borrow]
+        Ownable2Step ownable;
     }
 }
 
+// IMPORTANT: Only ONE #[public] block per contract!
 #[public]
-#[inherit(Erc20<StylusTokenParams>)]
+#[inherit(Erc20<StylusTokenParams>, Ownable2Step)]
 impl StylusToken {
-    /// Mints tokens to the caller
-    pub fn mint(&mut self, value: U256) -> Result<(), Erc20Error> {
-        let sender: Address = self.vm().msg_sender();
-        self.erc20.mint(sender, value)?;
+    /// Initialize the contract with an owner
+    /// This should be called right after deployment
+    pub fn init(&mut self, initial_owner: Address) -> Result<(), Ownable2StepError> {
+        // Check if already initialized (owner is not zero)
+        if self.ownable.owner() != Address::ZERO {
+            return Err(Ownable2StepError::OwnableUnauthorizedAccount(
+                ownable2step::OwnableUnauthorizedAccount { account: self.vm().msg_sender() },
+            ));
+        }
+        self.ownable.init(initial_owner)?;
         Ok(())
     }
 
-    /// Mints tokens to another address
-    pub fn mint_to(&mut self, to: Address, value: U256) -> Result<(), Erc20Error> {
-        self.erc20.mint(to, value)?;
+        /// Mints tokens to the caller - only owner can call
+    pub fn mint(&mut self, value: U256) -> Result<(), Ownable2StepError> {
+        // Check if caller is owner
+        self.ownable.only_owner()?;
+        
+        // Mint tokens
+        let sender: Address = self.vm().msg_sender();
+        let _ = self.erc20.mint(sender, value);
+        Ok(())
+    }
+
+    /// Mints tokens to another address - only owner can call
+    pub fn mint_to(&mut self, to: Address, value: U256) -> Result<(), Ownable2StepError> {
+        // Check if caller is owner
+        self.ownable.only_owner()?;
+        
+        // Mint tokens
+        let _ = self.erc20.mint(to, value);
         Ok(())
     }
 
